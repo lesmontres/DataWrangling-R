@@ -1,0 +1,293 @@
+---
+title: "R Sample Code - Thuy Nguyen"
+output: pdf_document
+---
+
+```{r setup, include=TRUE, warning = FALSE, message=FALSE, results='hide'}
+
+library(tidyverse)
+library(stringr)
+
+# The purpose of this script is to perform data cleaning and transformation
+# of student redcords, which are downloaded from PeopleSoft reports 
+# and will need to be uploaded to Symplicity system
+
+#****************************************************#
+#********************REPORT 1************************#
+#****************************************************#
+
+#loading the data after removing logo and first empty rows
+downloaded_records <- read_csv("SR_SYMPL_RPT.csv")
+
+#Remove empty rows
+records <- downloaded_records %>% 
+  filter(!is.na(`EMPLID`)) 
+
+#Renaming Majors
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^CIS"), "All CIS Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^ACC"), "All Accountancy Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^MGMT"), "All Management Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^MKT"), "All Marketing Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^BUEC"), "All Economics Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^EC"), "All Economics Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^ENTR"), "All Entrepreneurship Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^EQ"), "All Equine Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^FIN"), "All Finance Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "MBA"), "All MBA Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^BUAN"), "All MSBA Programs", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "BUXXXX"), "Business Undecided", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "BU  PRE"), "Pre-Business Intended Major", records$MAJOR)
+records$MAJOR <- ifelse(str_detect(records$MAJOR, "^XXXX"), "Pre-Business Intended Major", records$MAJOR)
+
+#Renaming Minors
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^CIS"), "All CIS Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^EC"), "All Economics Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^ENTR"), "All Entrepreneurship Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^EQ"), "All Equine Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^FIN"), "All Finance Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^MGMT"), "All Management Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^IBUS"), "All Management Programs", records$MINOR1)
+records$MINOR1 <- ifelse(str_detect(records$MINOR1, "^MKT"), "All Marketing Programs", records$MINOR1)
+
+#Drop duplicates rows
+records <- unique(records)
+
+#The number of final records should be
+length(unique(records$EMPLID))
+
+#Count IDs that appeared in the records.
+#Select those that have EMPLID appeared more than once
+duplicateID <- records %>% 
+ count(EMPLID) %>% 
+ filter(n!= 1)
+
+#Subset of unique records (students who has one major)
+unique_records <- records %>% 
+  filter(!(EMPLID %in% duplicateID$EMPLID)) 
+
+#Pull out records using the duplicate ID 
+duplicate_records <- records %>% 
+  filter(EMPLID %in% duplicateID$EMPLID) 
+
+#The number of unique records in the duplicates
+length(unique(duplicate_records$EMPLID))
+
+#****************************************************#
+
+#Double Major Consolidation
+#dropping records with duplicate major values
+maj <- duplicate_records %>% 
+  select (EMPLID, MAJOR) %>% 
+  unique()
+
+#Filter EMPLID that have more than one major
+two_maj <- maj %>% 
+  count(EMPLID) %>% 
+  filter(n!=1)
+
+#Pull out ID and MAJOR columns of students who have more than one minor
+double_major_id <- maj %>% 
+  filter(EMPLID %in% two_maj$EMPLID) 
+
+#Consolidate mutiple rows of majors into 1
+consolidate_double_maj <- aggregate( MAJOR ~ EMPLID, data = double_major_id, paste, collapse = "; ")
+
+#Records of students with double majors
+double_BU_maj_records <- inner_join(consolidate_double_maj, duplicate_records, by = "EMPLID") %>%
+  select(-MAJOR.y, -MINOR1) %>%
+  rename(MAJOR = MAJOR.x) %>%
+  unique()
+
+#-----------------HANDLING MULTIPLE MINOR-------------------------#
+
+#Multiple Minor Consolidation  
+minor <- duplicate_records %>% 
+  select (EMPLID, MINOR1) %>% 
+  filter (!is.na(MINOR1)) %>% 
+  unique()  
+
+#Filter EMPLID of students who have more than one minor
+multi_minor <- minor %>% 
+  count(EMPLID) %>% 
+  filter(n!=1) 
+
+#Pull out ID and MINOR columns of students who have more than one minor
+multi_minor_id <- minor %>% 
+  filter(EMPLID %in% multi_minor$EMPLID) 
+
+#Consolidate mutiple rows of minors into 1
+consolidate_multi_minor <- aggregate( MINOR1 ~ EMPLID, data = multi_minor_id, paste, collapse = "; ")
+
+#Records of students with multiple minors
+multi_minor_records <- inner_join(consolidate_multi_minor, duplicate_records, by = "EMPLID") %>%
+  select(-MINOR1.y) %>%
+  rename(MINOR1 = MINOR1.x) %>%
+  unique() 
+
+#-----------------HANDLING SPECIAL CASE-------------------------#
+#HANDLING CASES WHERE STUDENTS HAVE MULTIPLE MINORS AND DOUBLE MAJOR
+special_case_ID <- multi_minor_records %>% 
+  count(EMPLID) %>% 
+  filter(n!=1) 
+
+special_case <- multi_minor_records %>% 
+  filter(EMPLID %in% special_case_ID$EMPLID)
+
+multi_minor_records_one_major <- multi_minor_records %>% 
+  filter(!(EMPLID %in% special_case_ID$EMPLID))
+
+special_case[c("EMPLID", "MAJOR")] <- aggregate( MAJOR ~ EMPLID, data = special_case, paste, collapse = "; ")
+
+#consolidate records with double major AND multiple minor
+consolidate_double_maj <- aggregate( MAJOR ~ EMPLID, data = double_major_id, paste, collapse = "; ")
+
+multi_minor_records_2 <- full_join(multi_minor_records_one_major, special_case)
+
+#Joining records with double major and multi minors
+joined_records  <- full_join(double_BU_maj_records, multi_minor_records_2)
+joined_records <- unique(joined_records)
+
+
+#Joining all records from the first import
+full_records <- full_join(joined_records , unique_records) 
+
+#Create Manjiri Import column
+full_records$`Manjiri Import` <- "Yes"
+
+#Select the required columns
+full_records <- full_records %>% 
+  select(EMPLID, LASTNAME, FIRSTNAME, `Middle Name`, MAJOR, MINOR1, EMAIL, CLASS, CLSF, PHONE, ADDRESS1, ADDRESS2, CITY, STATE, POSTAL, COUNTRY, `Manjiri Import`, `CUM GPA`, `USER ID` )
+
+
+#****************************************************#
+
+#TREATING RECORDS WITH SAME MINOR AND MAJOR:
+#Seperate Majors and Minors into different columns
+test <- separate(full_records, MAJOR, c("MAJOR", "SMAJ"), sep = "; ")
+test <- separate(test, MINOR1, c("MINOR1", "MINOR2", "MINOR3"), sep = "; ")
+
+#Pull out cases where there is a repeat in major and minor 
+#For ex a student Major in CIS but also minor in CIS
+same <- test  %>% 
+  filter(MAJOR == MINOR1 | SMAJ == MINOR1 | MAJOR == MINOR2 | SMAJ == MINOR2 |MAJOR == MINOR3 | SMAJ == MINOR3 )
+
+#--------Consolidate repeat major -  minor records-------#
+#Replace Minor with NA when MAJOR = MINOR
+same$MINOR1[same$MAJOR == same$MINOR1] <- NA
+same$MINOR1[same$SMAJ == same$MINOR1] <- NA
+same$MINOR2[same$MAJOR == same$MINOR2] <- NA
+same$MINOR2[same$SMAJ == same$MINOR2] <- NA
+same$MINOR3[same$MAJOR == same$MINOR3] <- NA
+same$MINOR3[same$SMAJ == same$MINOR3] <- NA
+
+#Putting the MAJOR and MINOR column back together
+same_2 <- unite(same, "MAJOR", c("MAJOR", "SMAJ"), sep = "; ", na.rm = TRUE)
+same_2 <- unite(same_2, "MINOR1", c("MINOR1", "MINOR2", "MINOR3"), sep = "; ", na.rm = TRUE)
+
+#Subset of unique records 
+unique_1 <- full_records %>% 
+  filter(!(EMPLID %in% same_2$EMPLID))
+
+#Joining unique and consolidated records
+full_records_1 <- full_join(unique_1, same_2)
+
+
+#****************************************************#
+#********************REPORT 2************************#
+#****************************************************#
+
+#load records of students who major outside College of Business
+#but has a least one minor in Business
+downloaded_business_minor <- read_csv("SR_SYM_MINOR.csv")
+
+#drop empty rows, rename MINOR2 as MINOR1, rename CUM_GPA as CUM GPA
+BU_minor <- downloaded_business_minor %>% 
+  filter(!is.na(`EMPLID`)) %>% 
+  rename(MINOR1 = MINOR2) %>% 
+  rename(`CUM GPA` = CUM_GPA) 
+
+#Make sure ADDRESS2 is character
+BU_minor$ADDRESS2 <- as.character(BU_minor$ADDRESS2)
+
+#Change name of the Minors
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^CIS"), "All CIS Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^EC"), "All Economics Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^ENTR"), "All Entrepreneurship Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^EQ"), "All Equine Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^FIN"), "All Finance Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^MGMT"), "All Management Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^IBUS"), "All Management Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^BA"), "All Management Programs", BU_minor$MINOR1)
+BU_minor$MINOR1 <- ifelse(str_detect(BU_minor$MINOR1, "^MKT"), "All Marketing Programs", BU_minor$MINOR1)
+
+#Drop duplicates rows (just in case)
+BU_minor <- unique(BU_minor)
+
+#Filter EMPLID that have more than one minor
+multi_minor_2 <- BU_minor %>% 
+  count(EMPLID) %>% 
+  filter(n!=1) 
+ 
+#Filter records with multiple minors 
+multi_minor_id_2 <- BU_minor %>% 
+  filter(EMPLID %in% multi_minor_2$EMPLID) 
+
+#Pull out records of single minor(unique)
+single_minor <-  BU_minor %>% 
+  filter(!(EMPLID %in% multi_minor_2$EMPLID))
+
+#consolidate the minors in these records
+consolidate_multi_minor_2 <- aggregate( MINOR1 ~ EMPLID, data = multi_minor_id_2, paste, collapse = "; ")
+
+
+multi_minor_records_2 <- inner_join(consolidate_multi_minor_2, BU_minor, by = "EMPLID") %>%
+  select(-MINOR1.y) %>%
+  rename(MINOR1 = MINOR1.x) %>%
+  unique()
+
+full_records_2 <- full_join(single_minor, multi_minor_records_2)
+
+#Create Manjiri Import and MAJOR column
+full_records_2$`Manjiri Import` <- "Yes"
+full_records_2$MAJOR <- ""
+
+full_records_2 <- full_records_2 %>% 
+  select(EMPLID, LASTNAME, FIRSTNAME, `Middle Name`, MAJOR, MINOR1, EMAIL, CLASS, CLSF, PHONE, ADDRESS1, ADDRESS2, CITY, STATE, POSTAL, COUNTRY, `Manjiri Import`, `CUM GPA`, `USER ID` )
+
+#****************************************************#
+#CONSOLIDATE 2 REPORTS
+full_records_combined <- full_join(full_records_1, full_records_2)
+
+testing123 <- full_records_combined  %>% 
+  count(EMPLID) %>% 
+  filter(n!=1) 
+
+
+full_records_combined_2 <- full_records_combined %>% 
+  filter( !((EMPLID %in% testing123$EMPLID) & (MAJOR == ""))) 
+
+
+full_records_combined_2 <- unite(full_records_combined_2, "ADDRESS1", c("ADDRESS1", "ADDRESS2"), sep = "; ", na.rm = TRUE)
+
+
+full_records_combined_2 <- full_records_combined_2 %>% 
+  select(EMPLID, LASTNAME, FIRSTNAME, `Middle Name`, MAJOR, MINOR1, EMAIL, CLASS, CLSF, PHONE, ADDRESS1, CITY, STATE, POSTAL, COUNTRY, `Manjiri Import`, `CUM GPA`, `USER ID` )
+
+
+#Replace NA by empty string
+#full_records <- sapply(full_records, as.character)
+full_records_combined_2[is.na(full_records_combined_2)] <- ""
+
+#CHECK FOR DUPLICATES- SHOULD BE 0
+full_records_combined_2 %>% 
+ count(EMPLID) %>% 
+  filter(n!=1) 
+
+full_records_combined_2$CLASS[full_records_combined_2$CLASS == "UNDERGRADUATE - Pursuing Bachelors Degree"] <- "Undergraduate-Pursuing Bachelor's Degree"
+full_records_combined_2$CLASS[full_records_combined_2$CLASS == "GRADUATE-Pursuing Masters or Doctorate Degree" ] <- "Graduate-Pursuing Master's or Doctorate Degree"
+
+#EXPORT
+write_csv(full_records_combined_2, "BU MAJORS MINORS for symport new.csv")
+
+```
+
